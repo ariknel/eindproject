@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Control Dashboard</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .battery-bar {
+      width: 8px;
+      height: 20px;
+      margin: 0px;
+      background-color: #e5e7eb; /* Tailwind gray-200 */
+      transition: background-color 0.3s;
+    }
+    .battery-bar.filled {
+      background-color: #22c55e; /* Tailwind green-500 */
+    }
+  </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+  <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-md text-center relative">
+    <h1 class="text-2xl font-bold mb-4 text-gray-800">Control Dashboard</h1>
+
+    <!-- Battery Display -->
+    <div class="flex flex-col items-center justify-center mb-6">
+      <div class="flex items-center mb-2">
+        <span class="text-sm text-gray-600 mr-2">Battery:</span>
+        <span id="batteryPercent" class="text-sm font-medium text-gray-700">0%</span>
+      </div>
+      <div class="flex items-end border border-gray-400 rounded-sm p-1 pr-2">
+        <div class="flex space-x-0.5" id="batteryBars"></div>
+        <div class="w-2 h-5 bg-gray-400 ml-1 rounded-sm"></div>
+      </div>
+    </div>
+
+    <!-- Mode Buttons -->
+    <div class="mb-6">
+      <p class="mb-2 text-sm font-medium text-gray-700">Select Mode</p>
+      <div class="flex justify-between gap-2">
+        <button class="mode-btn bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold py-2 px-4 rounded-xl w-1/3" data-mode="Turtle">🐢 Turtle</button>
+        <button class="mode-btn bg-green-100 hover:bg-green-200 text-green-700 font-bold py-2 px-4 rounded-xl w-1/3" data-mode="Eco">🌱 Eco</button>
+        <button class="mode-btn bg-red-100 hover:bg-red-200 text-red-700 font-bold py-2 px-4 rounded-xl w-1/3" data-mode="Sport">🏎️ Sport</button>
+      </div>
+    </div>
+
+    <!-- Speed Slider -->
+    <div class="mb-6">
+      <label for="speedSlider" class="block mb-2 text-sm font-medium text-gray-700">Speed</label>
+      <input id="speedSlider" type="range" min="0" max="255" value="0" class="w-full">
+      <p class="mt-2 text-gray-600">Value: <span id="speedValue">0</span></p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex justify-between mt-6">
+      <button id="btn1" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-xl w-[45%]">Gas</button>
+      <button id="btn2" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-xl w-[45%]">Noodstop - Achteruit</button>
+    </div>
+
+    <!-- Distance Display -->
+    <div class="mt-6 flex flex-col items-center justify-center">
+      <div class="flex items-center mb-1">
+        <span class="text-sm text-gray-600 mr-2">Distance:</span>
+        <span id="distanceValue" class="text-sm font-medium text-gray-700">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Watermark -->
+  <div class="fixed bottom-2 right-2 text-xs text-gray-400 select-none pointer-events-none">
+    2025
+  </div>
+
+  <script>
+    const client = mqtt.connect("ws://192.168.1.120:9001");
+
+    client.on("connect", () => {
+      console.log("MQTT connected");
+      client.subscribe("esp32/status/battery");
+      client.subscribe("esp32/status/distance"); // Subscribe to distance topic
+    });
+
+    const speedSlider = document.getElementById("speedSlider");
+    const speedValue = document.getElementById("speedValue");
+    const btn1 = document.getElementById("btn1");
+    const btn2 = document.getElementById("btn2");
+    const modeButtons = document.querySelectorAll(".mode-btn");
+    const batteryBars = document.getElementById("batteryBars");
+    const batteryPercent = document.getElementById("batteryPercent");
+    const distanceValue = document.getElementById("distanceValue");
+
+    function publish(topic, message) {
+      client.publish(topic, message);
+      console.log(`Published: ${topic} => ${message}`);
+    }
+
+    // Insert 10 battery bars dynamically
+    for (let i = 0; i < 10; i++) {
+      const bar = document.createElement("div");
+      bar.classList.add("battery-bar");
+      batteryBars.appendChild(bar);
+    }
+
+    // Handle incoming MQTT messages
+    client.on("message", (topic, message) => {
+      if (topic === "esp32/status/battery") {
+        const percent = parseInt(message.toString());
+        const filledBars = Math.floor(percent / 10);
+
+        batteryPercent.textContent = `${percent}%`;
+
+        Array.from(batteryBars.children).forEach((bar, index) => {
+          bar.classList.toggle("filled", index < filledBars);
+        });
+      }
+
+      if (topic === "esp32/status/distance") {
+        const distance = parseInt(message.toString());
+        distanceValue.textContent = `${distance}`;
+      }
+    });
+
+    // Mode buttons
+    modeButtons.forEach(button => {
+      button.addEventListener("click", () => {
+        const mode = button.getAttribute("data-mode");
+        publish("esp32/control/mode", mode);
+      });
+    });
+
+    // Speed slider
+    speedSlider.addEventListener("input", () => {
+      speedValue.textContent = speedSlider.value;
+      publish("esp32/control/speed", speedSlider.value);
+    });
+
+    // Action buttons
+    function setupButtonState(buttonElement, label) {
+      const topicPressed = "esp32/control/buttonsactive";
+      const topicReleased = "esp32/control/buttonsoff";
+
+      buttonElement.addEventListener("mousedown", () => {
+        publish(topicPressed, label);
+      });
+
+      buttonElement.addEventListener("mouseup", () => {
+        publish(topicReleased, label);
+      });
+
+      buttonElement.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        publish(topicPressed, label);
+      });
+
+      buttonElement.addEventListener("touchend", () => {
+        publish(topicReleased, label);
+      });
+    }
+
+    setupButtonState(btn1, "button1");
+    setupButtonState(btn2, "button2");
+  </script>
+</body>
+</html>
